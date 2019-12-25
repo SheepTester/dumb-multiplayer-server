@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>Dumb client</title>
+    <meta name="description" content="A dumb client"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <style>
+      /* TEMP */
+    </style>
+  </head>
+  <body>
+    <p><label>Connect to <input type="url" id="ws-url" value="ws://localhost:3000/"></label> <button id="connect">Connect</button></p>
+    <p><textarea id="messages" rows="8" cols="80" placeholder="Log" readonly></textarea></p>
+    <p><input type="text" id="message" placeholder="Send a message"> <button id="send-msg">Send</button></p>
+    <script>
+const wsURLInput = document.getElementById('ws-url')
+const connectBtn = document.getElementById('connect')
+const messagesBox = document.getElementById('messages')
+const messageInput = document.getElementById('message')
+const sendMsgBtn = document.getElementById('send-msg')
+let socket
+
+// Click submit buttons upon pressing enter
+wsURLInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') connectBtn.click()
+})
+messageInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') sendMsgBtn.click()
+})
+
+function log (msg) {
+  messagesBox.value += msg + '\n'
+}
+
+connectBtn.addEventListener('click', e => {
+  try {
+    socket = new WebSocket(wsURLInput.value)
+    socket.addEventListener('open', e => {
+      log('Connection opened!')
+    })
+    socket.addEventListener('error', e => {
+      log('[!] ' + e)
+    })
+    socket.addEventListener('message', ({ data }) => {
+      const msg = JSON.parse(data)
+      if (msg.type === 'message') {
+        log(`[${msg.from}] ${msg.text}`)
+      }
+    })
+    socket.addEventListener('close', e => {
+      log('Connection closed.')
+    })
+  } catch (e) {
+    log('[!] ' + e)
+  }
+})
+
+sendMsgBtn.addEventListener('click', e => {
+  if (socket && messageInput.value) {
+    socket.send(JSON.stringify({ type: 'message', text: messageInput.value, from: 'Billy' }))
+    messageInput.value = ''
+  }
+})
+    </script>
+  </body>
+</html>
