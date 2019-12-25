@@ -6,19 +6,34 @@
     <meta name="description" content="A dumb client"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
     <style>
-      /* TEMP */
+      html {
+        touch-action: none;
+      }
+      #canvas {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
     </style>
   </head>
   <body>
+    <canvas id="canvas"></canvas>
     <p><label>Connect to <input type="url" id="ws-url" value="ws://localhost:3000/"></label> <button id="connect">Connect</button></p>
     <p><textarea id="messages" rows="8" cols="80" placeholder="Log" readonly></textarea></p>
     <p><input type="text" id="message" placeholder="Send a message"> <button id="send-msg">Send</button></p>
     <script>
+'use strict'
+
 const wsURLInput = document.getElementById('ws-url')
 const connectBtn = document.getElementById('connect')
 const messagesBox = document.getElementById('messages')
 const messageInput = document.getElementById('message')
 const sendMsgBtn = document.getElementById('send-msg')
+const canvas = document.getElementById('canvas')
+const c = canvas.getContext('2d')
 let socket
 
 // Click submit buttons upon pressing enter
@@ -29,15 +44,60 @@ messageInput.addEventListener('keydown', e => {
   if (e.key === 'Enter') sendMsgBtn.click()
 })
 
+let width, height
+function resize () {
+  const dpr = window.devicePixelRatio
+  width = window.innerWidth
+  height = window.innerHeight
+  canvas.width = width * dpr
+  canvas.height = height * dpr
+  c.scale(dpr, dpr)
+}
+window.addEventListener('resize', resize)
+resize()
+
+const RADIUS = 20
+const users = new Map()
+function render () {
+  c.clearRect(0, 0, width, height)
+  for (const data of users.values()) {
+    const { colour, x, y } = data
+    // Not frame rate independent oof
+    data.displayX += (x - data.displayX) / 5
+    data.displayY += (y - data.displayY) / 5
+    c.fillStyle = `rgba(${colour >> 16 & 0xff}, ${colour >> 8 & 0xff}, ${colour >> 0 & 0xff}, 0.5)`
+    c.beginPath()
+    c.moveTo(data.displayX + RADIUS, data.displayY)
+    c.arc(data.displayX, data.displayY, RADIUS, 0, 2 * Math.PI)
+    c.fill()
+  }
+  c.fillStyle = 'rgba(0, 0, 0, 0.8)'
+  c.font = '14px monospace'
+  c.textAlign = 'center'
+  c.textBaseline = 'middle'
+  for (const data of users.values()) {
+    const { username, displayX, displayY } = data
+    c.fillText(username, displayX, displayY)
+  }
+  window.requestAnimationFrame(render)
+}
+render()
+
 function log (msg) {
   messagesBox.value += msg + '\n'
 }
+
+let onNextMsg = []
 
 connectBtn.addEventListener('click', e => {
   try {
     socket = new WebSocket(wsURLInput.value)
     socket.addEventListener('open', e => {
       log('Connection opened!')
+      log('[Client] What is your name?')
+      onNextMsg.push(name => {
+        socket.send(JSON.stringify({ type: 'username', name }))
+      })
     })
     socket.addEventListener('error', e => {
       log('[!] ' + e)
@@ -46,6 +106,35 @@ connectBtn.addEventListener('click', e => {
       const msg = JSON.parse(data)
       if (msg.type === 'message') {
         log(`[${msg.from}] ${msg.text}`)
+      } else if (msg.type === 'hi') {
+        users.set(msg.id, {
+          ...msg.userData,
+          displayX: 0,
+          displayY: 0
+        })
+      } else if (msg.type === 'intros') {
+        for (const [id, userData] of msg.users) {
+          users.set(id, {
+            ...userData,
+            displayX: 0,
+            displayY: 0
+          })
+        }
+      } else if (msg.type === 'bye') {
+        users.delete(msg.id)
+      } else if (msg.type === 'positions') {
+        for (const { id, x, y } of msg.positions) {
+          const entry = users.get(id)
+          if (entry) {
+            entry.x = x
+            entry.y = y
+          }
+        }
+      } else if (msg.type === 'username-change') {
+        const entry = users.get(id)
+        if (entry) {
+          entry.username = msg.username
+        }
       }
     })
     socket.addEventListener('close', e => {
@@ -58,9 +147,33 @@ connectBtn.addEventListener('click', e => {
 
 sendMsgBtn.addEventListener('click', e => {
   if (socket && messageInput.value) {
-    socket.send(JSON.stringify({ type: 'message', text: messageInput.value, from: 'Billy' }))
+    if (onNextMsg[0]) {
+      onNextMsg.pop()(messageInput.value)
+    } else {
+      socket.send(JSON.stringify({ type: 'message', text: messageInput.value, from: 'Billy' }))
+    }
     messageInput.value = ''
   }
+})
+
+let trackingPointer = null
+document.addEventListener('pointerdown', e => {
+  if (trackingPointer === null) trackingPointer = e.pointerId
+})
+document.addEventListener('pointermove', e => {
+  if (socket && (trackingPointer === null || e.pointerId === trackingPointer)) {
+    socket.send(JSON.stringify({
+      type: 'position',
+      x: e.clientX,
+      y: e.clientY
+    }))
+  }
+})
+document.addEventListener('pointerup', e => {
+  if (e.pointerId === trackingPointer) trackingPointer = null
+})
+document.addEventListener('pointercancel', e => {
+  if (e.pointerId === trackingPointer) trackingPointer = null
 })
     </script>
   </body>
